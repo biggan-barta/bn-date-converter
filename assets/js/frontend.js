@@ -1,82 +1,80 @@
 (function() {
-    // Make sure bnDateConverter object exists
-    if (typeof window.bnDateConverter === 'undefined') {
-        console.error('Bangla Date Converter: Configuration not found');
+    // Exit early if configuration is not available
+    if (typeof window.bnDateConverter === 'undefined' || !window.bnDateConverter.selectors) {
         return;
     }
 
+    var processed = false;
+    var digits = window.bnDateConverter.digits;
+
     function convertToBengaliDigits(text) {
         if (!text || typeof text !== 'string') return text;
-        const englishDigits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
         
         return text.replace(/[0-9]/g, function(digit) {
-            return window.bnDateConverter.digits[englishDigits.indexOf(digit)];
+            return digits[parseInt(digit)];
         });
     }
 
-    // Make processCustomSelectors available globally
+    // Make processCustomSelectors available globally with throttling
     window.bnDateConverter.processCustomSelectors = function processCustomSelectors() {
-        if (!window.bnDateConverter.selectors) return;
+        if (processed) return; // Prevent multiple executions
         
-        const selectors = window.bnDateConverter.selectors
+        var selectors = window.bnDateConverter.selectors
             .split('\n')
-            .map(s => s.trim())
-            .filter(s => s.length > 0);
+            .map(function(s) { return s.trim(); })
+            .filter(function(s) { return s.length > 0; });
 
         if (selectors.length === 0) return;
 
         try {
-            selectors.forEach(selector => {
+            for (var i = 0; i < selectors.length; i++) {
                 try {
-                    const elements = document.querySelectorAll(selector);
+                    var elements = document.querySelectorAll(selectors[i]);
                     
-                    elements.forEach(element => {
-                        // Process all text nodes within the element
-                        const walker = document.createTreeWalker(
-                            element,
-                            NodeFilter.SHOW_TEXT,
-                            null,
-                            false
-                        );
-
-                        let node;
-                        while (node = walker.nextNode()) {
-                            const originalText = node.nodeValue;
-                            const convertedText = convertToBengaliDigits(originalText);
+                    for (var j = 0; j < elements.length; j++) {
+                        var element = elements[j];
+                        
+                        // Process only direct text nodes for better performance
+                        if (element.childNodes.length === 1 && element.childNodes[0].nodeType === 3) {
+                            var originalText = element.textContent;
+                            var convertedText = convertToBengaliDigits(originalText);
                             if (originalText !== convertedText) {
-                                node.nodeValue = convertedText;
+                                element.textContent = convertedText;
+                            }
+                        } else {
+                            // For complex elements, process text nodes
+                            var walker = document.createTreeWalker(
+                                element,
+                                NodeFilter.SHOW_TEXT,
+                                null,
+                                false
+                            );
+
+                            var node;
+                            while (node = walker.nextNode()) {
+                                var originalText = node.nodeValue;
+                                var convertedText = convertToBengaliDigits(originalText);
+                                if (originalText !== convertedText) {
+                                    node.nodeValue = convertedText;
+                                }
                             }
                         }
-                    });
+                    }
                 } catch (selectorError) {
-                    console.error('Invalid selector:', selector, selectorError);
+                    // Silently skip invalid selectors
                 }
-            });
+            }
+            processed = true;
         } catch (error) {
-            console.error('Bangla Date Converter Error:', error);
+            // Silently handle errors
         }
-    }
+    };
 
-    // Initial processing on DOM ready
+    // Process on DOM ready or immediately if already loaded
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', processCustomSelectors);
+        document.addEventListener('DOMContentLoaded', window.bnDateConverter.processCustomSelectors);
     } else {
-        processCustomSelectors();
+        // Use setTimeout to avoid blocking
+        setTimeout(window.bnDateConverter.processCustomSelectors, 0);
     }
-
-    // Process dynamic content with debouncing
-    let timeout;
-    const observer = new MutationObserver(function() {
-        clearTimeout(timeout);
-        timeout = setTimeout(processCustomSelectors, 100);
-    });
-
-    // Start observing the document
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-
-    // Initial call to process selectors
-    window.bnDateConverter.processCustomSelectors();
 })();

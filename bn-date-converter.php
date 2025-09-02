@@ -3,7 +3,7 @@
  * Plugin Name: Bangla Date Converter
  * Plugin URI: 
  * Description: Converts English digits to Bangla digits for date, time and entry meta.
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: BigganBarta
  * Author URI: https://bigganbarta.org
  * Text Domain: bn-date-converter
@@ -17,40 +17,67 @@ if (!defined('ABSPATH')) {
 class BN_Date_Converter {
     
     private $bn_digits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
-    private $options;
+    private $options = null;
+    private $converted_cache = [];
     
     public function __construct() {
-        $this->options = get_option('bn_date_converter_settings', [
-            'enable_dates' => 1,
-            'enable_times' => 1,
-            'enable_meta' => 1,
-            'custom_selectors' => '',
-            'excluded_pages' => ''
-        ]);
+        // Only load options when needed
+        add_action('init', [$this, 'init_plugin'], 1);
+
+        // Only load options when needed
+        add_action('init', [$this, 'init_plugin'], 1);
 
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'init_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
-        add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend_assets']);
         
-        // Additional hook for initialization
-        add_action('wp_footer', [$this, 'trigger_custom_conversion']);
-
+        // Only load frontend assets when needed
+        if (!is_admin()) {
+            add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend_assets']);
+            add_action('wp_footer', [$this, 'trigger_custom_conversion'], 99);
+        }
+    }
+    
+    public function init_plugin() {
+        // Only load options when not in admin or when specifically needed
+        if (!is_admin() || (is_admin() && isset($_GET['page']) && $_GET['page'] === 'bn-date-converter')) {
+            $this->load_options();
+            $this->setup_filters();
+        }
+    }
+    
+    private function load_options() {
+        if ($this->options === null) {
+            $this->options = wp_cache_get('bn_date_converter_settings');
+            if (false === $this->options) {
+                $this->options = get_option('bn_date_converter_settings', [
+                    'enable_dates' => 1,
+                    'enable_times' => 1,
+                    'enable_meta' => 1,
+                    'custom_selectors' => '',
+                    'excluded_pages' => ''
+                ]);
+                wp_cache_set('bn_date_converter_settings', $this->options, '', 3600);
+            }
+        }
+    }
+    
+    private function setup_filters() {
         // Apply filters based on settings
         if (!empty($this->options['enable_dates'])) {
-            add_filter('get_the_date', [$this, 'convert_to_bengali_digits']);
-            add_filter('the_date', [$this, 'convert_to_bengali_digits']);
-            add_filter('get_archives_link', [$this, 'convert_to_bengali_digits']);
+            add_filter('get_the_date', [$this, 'convert_to_bengali_digits'], 10, 1);
+            add_filter('the_date', [$this, 'convert_to_bengali_digits'], 10, 1);
+            add_filter('get_archives_link', [$this, 'convert_to_bengali_digits'], 10, 1);
         }
 
         if (!empty($this->options['enable_times'])) {
-            add_filter('get_the_time', [$this, 'convert_to_bengali_digits']);
-            add_filter('the_time', [$this, 'convert_to_bengali_digits']);
+            add_filter('get_the_time', [$this, 'convert_to_bengali_digits'], 10, 1);
+            add_filter('the_time', [$this, 'convert_to_bengali_digits'], 10, 1);
         }
 
         if (!empty($this->options['enable_meta'])) {
-            add_filter('get_comment_date', [$this, 'convert_to_bengali_digits']);
-            add_filter('get_comment_time', [$this, 'convert_to_bengali_digits']);
+            add_filter('get_comment_date', [$this, 'convert_to_bengali_digits'], 10, 1);
+            add_filter('get_comment_time', [$this, 'convert_to_bengali_digits'], 10, 1);
         }
     }
 
@@ -63,12 +90,14 @@ class BN_Date_Converter {
     }
 
     public function enqueue_frontend_assets() {
-        // Always enqueue the script as we might need it for dynamic content
-        wp_enqueue_script('bn-date-converter-frontend', plugins_url('assets/js/frontend.js', __FILE__), [], '1.0.0', true);
-        wp_localize_script('bn-date-converter-frontend', 'bnDateConverter', [
-            'selectors' => isset($this->options['custom_selectors']) ? $this->options['custom_selectors'] : '',
-            'digits' => $this->bn_digits
-        ]);
+        // Only load when custom selectors are defined and we're not in admin
+        if (!is_admin() && !empty($this->options['custom_selectors'])) {
+            wp_enqueue_script('bn-date-converter-frontend', plugins_url('assets/js/frontend.js', __FILE__), [], '1.0.1', true);
+            wp_localize_script('bn-date-converter-frontend', 'bnDateConverter', [
+                'selectors' => $this->options['custom_selectors'],
+                'digits' => $this->bn_digits
+            ]);
+        }
     }
 
     public function add_admin_menu() {
@@ -203,25 +232,47 @@ class BN_Date_Converter {
     }
 
     public function convert_to_bengali_digits($content) {
-        if (!$content || (is_page() && in_array(get_the_ID(), explode("\n", $this->options['excluded_pages'])))) {
+        if (!$content) {
             return $content;
         }
+
+        // Check cache first
+        $cache_key = md5($content);
+        if (isset($this->converted_cache[$cache_key])) {
+            return $this->converted_cache[$cache_key];
+        }
+
+        // Check excluded pages
+        if (is_page() && !empty($this->options['excluded_pages'])) {
+            $excluded_pages = array_map('trim', explode("\n", $this->options['excluded_pages']));
+            if (in_array(get_the_ID(), $excluded_pages)) {
+                return $content;
+            }
+        }
         
-        $numbers = range(0, 9);
-        $content = str_replace($numbers, $this->bn_digits, $content);
+        // Convert digits
+        $converted = str_replace(
+            ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
+            $this->bn_digits,
+            $content
+        );
         
-        return $content;
+        // Cache the result (limit cache size)
+        if (count($this->converted_cache) < 100) {
+            $this->converted_cache[$cache_key] = $converted;
+        }
+        
+        return $converted;
     }
 
     public function trigger_custom_conversion() {
-        if (!empty($this->options['custom_selectors'])) {
+        // Only output script if we have custom selectors and we're not in admin
+        if (!is_admin() && !empty($this->options['custom_selectors'])) {
             ?>
             <script type="text/javascript">
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof bnDateConverter !== 'undefined' && typeof bnDateConverter.processCustomSelectors === 'function') {
-                    bnDateConverter.processCustomSelectors();
-                }
-            });
+            if (typeof bnDateConverter !== 'undefined' && typeof bnDateConverter.processCustomSelectors === 'function') {
+                bnDateConverter.processCustomSelectors();
+            }
             </script>
             <?php
         }
@@ -261,3 +312,8 @@ class BN_Date_Converter {
 
 // Initialize the plugin
 $bn_date_converter = new BN_Date_Converter();
+
+// Clear cache on deactivation
+register_deactivation_hook(__FILE__, function() {
+    wp_cache_delete('bn_date_converter_settings');
+});
