@@ -64,6 +64,7 @@ Converted to Bangla: ০১২৩৪৫৬৭৮৯
 
 For support or feature requests, please visit [BigganBarta](https://bigganbarta.org)
 
+<<<<<<< HEAD
 ## Changelog
 
 ### Version 1.0.1 (August 31, 2025)
@@ -82,6 +83,8 @@ For support or feature requests, please visit [BigganBarta](https://bigganbarta.
 - Custom CSS selector support
 - Page exclusion feature
 
+=======
+>>>>>>> 4bf4c815b457a96acf1e3b5b5309d7b0792c2870
 ## License
 
 GPL v2 or later
